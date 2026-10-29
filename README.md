@@ -1,6 +1,6 @@
 # Consolidador de Inventario — RetailChain (UNION vs. UNION ALL)
 
-Este proyecto analiza las diferencias fundamentales entre el uso de los operadores `UNION` y `UNION ALL` en SQL para la consolidación de datos provenientes de múltiples sucursales de la cadena **RetailChain**.
+Este proyecto analiza el comportamiento y las diferencias operativas entre `UNION` y `UNION ALL` en SQL para consolidar datos de inventario entre distintas sucursales de la cadena **RetailChain**.
 
 ---
 
@@ -8,45 +8,44 @@ Este proyecto analiza las diferencias fundamentales entre el uso de los operador
 
 ### 1. ¿Cuántas filas devuelve cada consulta y por qué son distintas? Explicá con ejemplos concretos de los datos qué filas se eliminaron con UNION.
 
-* **`UNION ALL` devuelve 14 filas:** La Sucursal Norte aporta 7 registros y la Sucursal Sur aporta 7 registros. Al no aplicar ningún filtro ni deduplicación, combina directamente la totalidad de las filas ($7 + 7 = 14$).
-* **`UNION` devuelve 13 filas:** Elimina únicamente las filas que son **100% idénticas** en todas las columnas seleccionadas (`id_producto`, `nombre_producto`, `categoria` y `stock`).
+* **`UNION ALL` devuelve 14 filas:** La Sucursal Norte aporta 7 registros y la Sucursal Sur aporta 7 registros ($7 + 7 = 14$). Al apilar directamente todas las filas sin filtros ni procesamiento extra, conserva la totalidad de las entradas de ambas tablas.
+* **`UNION` también devuelve 14 filas:** No elimina ninguna fila porque **no existe ningún registro que sea 100% idéntico** en todas las columnas seleccionadas (`id_producto`, `nombre_producto`, `categoria` y `stock`).
 
-#### Caso concreto de eliminación en los datos:
-* **Producto 106 (`SSD Externo 1TB`):** En la Sucursal Norte tiene `stock = 10` y en la Sur tiene `stock = 7`. Como el valor de la columna `stock` difiere, las filas **no son idénticas**, por lo que `UNION` conserva ambas filas en el resultado.
-* **Productos 103 (`Monitor 4K 27"`) y 104 (`Teclado Mecánico`):** Tienen stocks diferentes en cada sucursal (5 vs 3 y 20 vs 18), por lo cual tampoco se eliminan.
-* **Producto 107 / 111 (`Webcam HD 1080p`):** Tienen el mismo nombre y categoría, pero sus `id_producto` son distintos (107 en Norte, 111 en Sur), lo que hace que las filas sean técnicamente diferentes para el motor.
-* **Producto idéntico eliminado:** Si existiera un registro donde `id_producto`, `nombre_producto`, `categoria` y `stock` coincidieran exactamente en ambas tablas (por ejemplo, dos filas con `106, 'SSD Externo 1TB', 'Almacenamiento', 10`), `UNION` habría descartado la repetición. La diferencia de 1 fila entre ambas consultas ocurre porque `UNION` identifica y elimina únicamente los registros con duplicación absoluta en sus campos.
+#### Análisis detallado con los datos del ejercicio:
+* **Diferencia por stock en mismo producto:** Los productos **103** (`Monitor 4K 27"`), **104** (`Teclado Mecánico`) y **106** (`SSD Externo 1TB`) figuran en ambas sucursales, pero tienen valores distintos en la columna `stock` (ej. en el producto 106, Norte tiene 10 unidades y Sur tiene 7 unidades). Como `UNION` evalúa la fila completa, al diferir el stock las considera filas distintas.
+* **Diferencia por ID en mismo nombre:** La `Webcam HD 1080p` se encuentra en ambas sucursales con el mismo nombre y categoría, pero en la Sucursal Norte posee `id_producto = 107` y en la Sur `id_producto = 111`. Esta variación en la clave primaria evita que el operador las identifique como duplicadas.
+* **Conclusión:** Para que `UNION` elimine un registro, **todas y cada una de sus columnas deben coincidir de forma idéntica**. Si insertáramos en la Sucursal Sur un registro exacto a uno de la Norte (por ejemplo: `101, 'Laptop Pro 15', 'Computación', 8`), `UNION` devolvería 13 filas al descartar esa repetición absoluta.
 
 ---
 
 ### 2. ¿Por qué UNION ALL es más eficiente que UNION? ¿Qué operación adicional realiza UNION internamente que consume más recursos?
 
-`UNION ALL` simplemente concatena o apila los conjuntos de resultados directamente a medida que los lee de memoria o disco.
+`UNION ALL` es más eficiente porque realiza una simple concatenación o apilamiento de los bloques de datos a medida que son leídos en memoria o desde el disco.
 
-En cambio, **`UNION` es computacionalmente más costoso** porque realiza un paso adicional en el plan de ejecución:
-1. **Ordenamiento / Hash Match (Deduplicación):** El motor debe almacenar en buffer las filas de ambas consultas y ejecutar un algoritmo de ordenamiento (*Sort*) o una tabla Hash (*Hash Match - Aggregate*) para comparar campo por campo y descartar los duplicados.
-2. **Uso de memoria y CPU:** Con volúmenes masivos de datos (millones de filas), este proceso consume recursos significativos de RAM y CPU, e incluso puede forzar escrituras temporales en disco (como `tempdb` en SQL Server), degradando el rendimiento.
+En cambio, **`UNION` requiere un paso computacional adicional en el plan de ejecución**:
+1. **Deduplicación (Sort / Hash Aggregate):** El motor SQL junta los resultados y ejecuta un ordenamiento (*Sort*) o una tabla en memoria (*Hash Match*) para comparar campo por campo y filtrar duplicados.
+2. **Consumo de recursos:** En volúmenes masivos de datos (millones de registros), este procesamiento extra exige un alto consumo de CPU y memoria RAM (o escrituras temporales en disco si la RAM se satura), aumentando significativamente el tiempo de respuesta.
 
 ---
 
 ### 3. ¿En qué casos de negocio usarías cada uno? Dá al menos dos ejemplos reales distintos a los del ejercicio.
 
-#### Casos de uso para `UNION ALL` (Preservar volumen y priorizar rendimiento):
-1. **Consolidación de logs o transacciones históricas:** Al unir la tabla de `ventas_2025` con `ventas_2026` para calcular la facturación anual global. Cada transacción es única y válida; no se busca eliminar filas ni perder tiempo procesando deduplicaciones.
-2. **Carga masiva de datos a un Data Lake o Data Warehouse:** En procesos ETL donde la deduplicación o limpieza se posterga para etapas posteriores y se requiere extraer y apilar datos crudos lo más rápido posible.
+#### Casos de uso para `UNION ALL` (Prioridad en volumen total y rendimiento):
+1. **Consolidación de transacciones históricas:** Combinar la tabla `ventas_2025` con `ventas_2026` para calcular la facturación anual acumulada. Como cada transacción es válida y única, no se debe perder tiempo en deduplicar.
+2. **Extracción masiva en pipelines ETL:** Cargar datos en bruto de múltiples logs web desde distintos servidores hacia un Data Lake o Data Warehouse, donde la deduplicación y limpieza se delegan a etapas posteriores.
 
-#### Casos de uso para `UNION` (Catálogos limpios e identificadores únicos):
-1. **Directorio unificado de contactos/clientes:** Combinar listas de clientes procedentes de dos sistemas distintos (ej. CRM de ventas web y sistema POS de tiendas físicas) para generar un padrón único de mailing sin enviar correos duplicados a la misma persona.
-2. **Maestro de código de proveedores o materias primas:** Consolidar proveedores de múltiples filiales para obtener la lista única de empresas habilitadas a nivel corporativo.
+#### Casos de uso para `UNION` (Prioridad en catálogos e identificadores únicos):
+1. **Padrón unificado de clientes (CRM):** Unir la lista de clientes del sistema de e-commerce con la del sistema POS de sucursales físicas para obtener un listado único de correos electrónicos y lanzar una campaña de marketing sin enviar correos repetidos.
+2. **Maestro de proveedores corporativos:** Consolidar los registros de proveedores de distintas filiales regionales para generar una lista única de proveedores homologados a nivel central.
 
 ---
 
 ### 4. ¿Qué pasa si las columnas de ambas consultas no coinciden en número o tipo? ¿Qué error genera SQL?
 
-Para que `UNION` o `UNION ALL` funcionen, las sentencias `SELECT` deben cumplir dos reglas estrictas de estructura:
+Para ejecutar operativamente `UNION` o `UNION ALL`, los conjuntos de datos deben ser compatibles estructuralmente:
 
-1. **Distinto número de columnas:** Si el primer `SELECT` solicita 4 columnas y el segundo solicita 3, el motor de base de datos arroja un error de sintaxis antes de ejecutar la consulta. 
-   * *Ejemplo de error (PostgreSQL):* `ERROR: EACH UNION query must have the same number of columns`.
-   * *Ejemplo de error (SQL Server):* `All queries combined using a UNION, INTERSECT or EXCEPT operator must have an equal number of expressions in their target lists.`
-2. **Incompatibilidad de tipos de datos:** Si la columna ordinal N de la primera consulta es de tipo numérico (`INT`) y la columna ordinal N de la segunda consulta es de tipo texto (`VARCHAR`) sin conversión implícita, el motor detendrá la ejecución con un error de conversión.
+1. **Distinto número de columnas:** Si el primer `SELECT` devuelve 4 columnas y el segundo 3, la consulta detiene su ejecución inmediatamente por error de sintaxis.
+   * *Error en PostgreSQL:* `ERROR: EACH UNION query must have the same number of columns`.
+   * *Error en SQL Server:* `All queries combined using a UNION, INTERSECT or EXCEPT operator must have an equal number of expressions in their target lists.`
+2. **Incompatibilidad de tipo de datos:** Si la columna N del primer `SELECT` es de tipo numérico (`INT`) y la posición N del segundo es de tipo texto (`VARCHAR`) y el motor no puede aplicar una conversión implícita, se genera un error de conversión de tipos.
    * *Ejemplo de error:* `Conversion failed when converting the varchar value 'Laptop' to data type int.`
